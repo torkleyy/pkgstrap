@@ -8,7 +8,7 @@
         ),
         "bar": (
             source: (
-                git_repo:  "https://github.com/torkleyy/sortnbackup2",
+                git_repo:  "https://github.com/torkleyy/sortnbackup",
                 tag: "1.3.0",
             ),
         ),

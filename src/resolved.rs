@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{anyhow, Context};
+use anyhow::{anyhow, bail, Context};
 use git2::{build::CheckoutBuilder, Cred, RemoteCallbacks, Repository};
 
 use crate::{Config, ConfigOverrides, DependencyOverride, DependencySource, Result};
@@ -59,7 +59,7 @@ impl Resolver {
                         }
                         DependencyOverride::LocalPath { local_path } => {
                             ResolvedDependency::LocalPath {
-                                local_path: local_path.clone(),
+                                local_path: local_path.canonicalize().with_context(|| anyhow!("path {} invalid or not supported", local_path.display()))?,
                             }
                         }
                     },
@@ -172,7 +172,11 @@ impl ResolvedDependency {
                 }
             }
             ResolvedDependency::LocalPath { local_path } => {
-                symlink::symlink_dir(local_path, target_dir).expect("failed to symlink");
+                if target_dir.exists() {
+                    bail!("target {} already exists, please remove first", target_dir.display());
+                }
+
+                symlink::symlink_dir(dbg!(local_path), target_dir).context("failed to symlink")?;
             }
         }
 
