@@ -10,4 +10,4 @@ edition = "2021"
 anyhow = "1.0.44"
 clap = "2.33.3"
 pkgstrap = { version = "0.1.0", path = "./lib" }
-ron-reboot = "0.1.0-preview4"
+ron-reboot = "0.1.0-preview5"

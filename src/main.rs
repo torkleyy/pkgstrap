@@ -26,6 +26,8 @@ fn app() -> Result<()> {
     std::fs::create_dir_all(&pkgstrap_base).unwrap();
     let deps_base = pkgstrap_base.join("deps");
     std::fs::create_dir_all(&deps_base).unwrap();
+    let git_base = pkgstrap_base.join("git");
+    std::fs::create_dir_all(&deps_base).unwrap();
 
     let override_file = pkgstrap_base.join("overrides.ron");
     if override_file.exists() {
@@ -44,7 +46,7 @@ fn app() -> Result<()> {
             .target
             .clone()
             .unwrap_or_else(|| deps_base.join(name));
-        dep.acquire(&pkgstrap_base, &target)
+        dep.acquire(&git_base, &target)
             .with_context(|| anyhow!("failed to acquire dependency {}", name))?;
     }
 

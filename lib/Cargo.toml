@@ -11,3 +11,4 @@ dirs = "4.0.0"
 git2 = "0.13.23"
 serde = { version = "1", features = ["derive"] }
 symlink = "0.1.0"
+url = "2.2.2"
