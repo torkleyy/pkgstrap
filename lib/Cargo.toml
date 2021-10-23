@@ -9,6 +9,7 @@ edition = "2021"
 anyhow = "1.0.44"
 dirs = "4.0.0"
 git2 = "0.13.23"
+remove_dir_all = "0.7.0"
 serde = { version = "1", features = ["derive"] }
 symlink = "0.1.0"
 url = "2.2.2"

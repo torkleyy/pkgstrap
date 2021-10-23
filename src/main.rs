@@ -128,7 +128,7 @@ fn app() -> Result<()> {
                     std_target_dir: &target,
                     in_tree_target_dirs: vec![],
 
-                    local_git_worktree: &local_git_workdirs.join(name)
+                    local_git_worktree: &local_git_workdirs.join(name),
                 })
                 .with_context(|| anyhow!("failed to acquire dependency {}", name))?;
             }

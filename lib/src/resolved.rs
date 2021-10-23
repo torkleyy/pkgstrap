@@ -6,7 +6,7 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context};
-use git2::{build::CheckoutBuilder, Cred, RemoteCallbacks, Repository, Worktree, WorktreeAddOptions, WorktreePruneOptions};
+use git2::{BranchType, build::CheckoutBuilder, Cred, RemoteCallbacks, Repository, Worktree, WorktreePruneOptions};
 use url::Url;
 
 use crate::{Config, ConfigOverrides, DependencyOverride, DependencySource, Directories, Result};
@@ -222,22 +222,29 @@ impl ResolvedDependency {
                     .context("invalid remote")?
                     .fetch(&[fetch_ref], Some(&mut fetch_opts()), None)
                     .with_context(|| anyhow!("failed to fetch from {}", url))?;
-                let checkout_reference = global_repo
-                    .find_reference(&checkout_ref)
-                    .with_context(|| anyhow!("cannot find reference {}", checkout_ref))?;
 
                 let worktree_name = if git_wt_dir.exists() {
-                    let canonicalized_local_dir = git_wt_dir.canonicalize().context("unsupported workdir path")?;
+                    let canonicalized_local_dir = git_wt_dir
+                        .canonicalize()
+                        .context("unsupported workdir path")?;
                     let canonicalized_local_dir = &canonicalized_local_dir;
-                    let all_worktrees = global_repo.worktrees().context("cannot query worktrees")?;
+                    let all_worktrees =
+                        global_repo.worktrees().context("cannot query worktrees")?;
 
-                    all_worktrees.iter().flatten().find(|name| {
-                        global_repo
-                            .find_worktree(name)
-                            .ok()
-                            .map(|w| w.path().canonicalize().ok().as_ref() == Some(canonicalized_local_dir))
-                            .unwrap_or(false)
-                    }).map(ToString::to_string)
+                    all_worktrees
+                        .iter()
+                        .flatten()
+                        .find(|name| {
+                            global_repo
+                                .find_worktree(name)
+                                .ok()
+                                .map(|w| {
+                                    w.path().canonicalize().ok().as_ref()
+                                        == Some(canonicalized_local_dir)
+                                })
+                                .unwrap_or(false)
+                        })
+                        .map(ToString::to_string)
                 } else {
                     None
                 };
@@ -245,35 +252,64 @@ impl ResolvedDependency {
                 let repo = if worktree_name.is_some() {
                     Repository::open(git_wt_dir)
                 } else {
+                    // TODO: there are probably some edge cases that aren't handled very well
+
                     if git_wt_dir.exists() {
-                        // this is a repo, but not a worktreee of the correct repo
-                        println!("  replacing worktree due to repo mismatch");
-                        let repo = Repository::open(git_wt_dir).context("could not open repo")?;
+                        // this might be a repo, but not a worktreee of the correct repo
+                        match Repository::open(git_wt_dir).context("could not open repo") {
+                            Ok(repo) => {
+                                println!("  replacing worktree due to repo mismatch");
 
-                        if !repo.is_worktree() {
-                            bail!("local git dirs must be worktrees, but found standalone repo")
+                                if !repo.is_worktree() {
+                                    bail!("local git dirs must be worktrees, but found standalone repo")
+                                }
+
+                                let worktree = Worktree::open_from_repository(&repo).unwrap();
+                                worktree
+                                    .prune(Some(
+                                        WorktreePruneOptions::new().valid(true).working_tree(true),
+                                    ))
+                                    .context("failed to remove outdated worktree")?;
+                            }
+                            _ => {
+                                println!("  removing leftover git worktree files");
+                                remove_dir_all::remove_dir_all(git_wt_dir)
+                                    .context("failed to remove leftover git worktree files")?;
+                            }
                         }
-
-                        let worktree = Worktree::open_from_repository(&repo).unwrap();
-                        worktree.prune(Some(WorktreePruneOptions::new().working_tree(true))).context("failed to remove outdated worktree")?;
-
                     }
 
-                    let mut worktree_options = WorktreeAddOptions::new();
-                    worktree_options.reference(Some(&checkout_reference));
+                    let worktree_name =
+                        format!("todo-{}", git_wt_dir.file_name().unwrap().to_str().unwrap());
+
+                    let raw_worktree_link_dir =
+                        global_repo.path().join("worktrees").join(&worktree_name);
+                    if raw_worktree_link_dir.exists() {
+                        if global_repo
+                            .find_worktree(&worktree_name)
+                            .map(|w| w.path().exists())
+                            .unwrap_or(false)
+                        {
+                            bail!(
+                                "worktree name conflict; worktree called {} already exists",
+                                worktree_name
+                            )
+                        }
+
+                        println!("  removing existing invalid worktree from repo");
+                        remove_dir_all::remove_dir_all(&raw_worktree_link_dir)
+                            .context("failed to remove worktree metadata from root repo")?;
+                    }
+
+                    if let Ok(mut b) = global_repo.find_branch(&worktree_name, BranchType::Local) {
+                        b.delete().context("could not delete old worktree branch")?;
+                    }
 
                     global_repo
                         .worktree(
-                            &format!(
-                                "todo-{}",
-                                git_wt_dir
-                                    .file_name()
-                                    .unwrap()
-                                    .to_str()
-                                    .unwrap()
-                            ),
+                            &worktree_name,
                             &git_wt_dir,
-                            Some(&worktree_options),
+                            None
                         )
                         .context("failed to create worktree")?;
 
