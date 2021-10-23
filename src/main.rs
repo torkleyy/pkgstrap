@@ -3,6 +3,16 @@ use std::{fs, fs::read_to_string, path::PathBuf};
 use anyhow::{anyhow, Context};
 use pkgstrap::*;
 use ron_reboot::from_str;
+use structopt::StructOpt;
+
+/// A basic example
+#[derive(StructOpt, Debug)]
+#[structopt(name = "pkgstrap")]
+struct Opt {
+    /// Verbose mode (-v, -vv, -vvv, etc.)
+    #[structopt(short, long, parse(from_occurrences))]
+    verbose: u8,
+}
 
 fn main() {
     if let Err(e) = app() {
@@ -15,6 +25,8 @@ fn main() {
 }
 
 fn app() -> Result<()> {
+    let _matches = Opt::from_args();
+
     let config_file = "pkgstrap.ron";
     let config_contents = read_to_string(config_file).context("could not open config")?;
 

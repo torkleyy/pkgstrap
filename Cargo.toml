@@ -1,6 +1,6 @@
 [package]
 name = "pkgstrap-bin"
-version = "0.1.0"
+version = "0.1.0-preview1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -8,6 +8,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.44"
-clap = "2.33.3"
+#clap = "2.33.3"
 pkgstrap = { version = "0.1.0", path = "./lib" }
 ron-reboot = "0.1.0-preview5"
+structopt = "0.3.25"
