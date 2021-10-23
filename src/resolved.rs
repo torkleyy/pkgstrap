@@ -1,7 +1,8 @@
+use git2::build::CheckoutBuilder;
+use git2::{Cred, RemoteCallbacks, Repository};
 use std::collections::HashMap;
 use std::env;
 use std::path::{Path, PathBuf};
-use git2::{Branch, BranchType, ObjectType, Oid, ResetType};
 
 use crate::{Config, ConfigOverrides, Dependency, DependencyOverride};
 
@@ -34,30 +35,26 @@ impl Resolver {
             .map(|(key, value)| {
                 let value = match overrides.and_then(|o| o.get(key)) {
                     None => match value {
-                        Dependency::GitRepository {
-                            git_repo,
-                            branch,
-                            git_ref,
-                        } => ResolvedDependency::GitRepository {
-                            url: git_repo.clone(),
-                            branch: branch.clone(),
-                            git_ref: git_ref.clone(),
-                        },
+                        Dependency::GitRepository { git_repo, git_ref } => {
+                            ResolvedDependency::GitRepository {
+                                url: git_repo.clone(),
+                                fetch_ref: git_ref.to_fetch_ref(),
+                                checkout_ref: git_ref.to_checkout_refspec(),
+                            }
+                        }
                     },
                     Some(o) => match o {
-                        DependencyOverride::GitRepository {
-                            git_repo,
-                            branch,
-                            git_ref,
-                        } => ResolvedDependency::GitRepository {
-                            url: git_repo
-                                .as_ref()
-                                .or(value.git_repo_url())
-                                .expect("TODO err handling")
-                                .clone(),
-                            branch: branch.as_ref().or(value.git_branch()).cloned(),
-                            git_ref: git_ref.as_ref().or(value.git_ref()).cloned(),
-                        },
+                        DependencyOverride::GitRepository { git_repo, git_ref } => {
+                            ResolvedDependency::GitRepository {
+                                url: git_repo
+                                    .as_ref()
+                                    .or(value.git_repo_url())
+                                    .expect("TODO err handling")
+                                    .clone(),
+                                fetch_ref: git_ref.to_fetch_ref(),
+                                checkout_ref: git_ref.to_checkout_refspec(),
+                            }
+                        }
                         DependencyOverride::LocalPath { local_path } => {
                             ResolvedDependency::LocalPath {
                                 local_path: local_path.clone(),
@@ -78,47 +75,55 @@ impl Resolver {
 pub enum ResolvedDependency {
     GitRepository {
         url: String,
-        branch: Option<String>,
-        git_ref: Option<String>,
+        fetch_ref: String,
+        checkout_ref: String,
     },
     LocalPath {
         local_path: PathBuf,
     },
 }
 
+fn fetch_opts() -> git2::FetchOptions<'static> {
+    // Prepare callbacks.
+    let mut callbacks = RemoteCallbacks::new();
+    callbacks.credentials(|_url, username_from_url, _allowed_types| {
+        Cred::ssh_key(
+            username_from_url.unwrap(),
+            None,
+            std::path::Path::new(&format!("{}/.ssh/id_rsa", env::var("HOME").unwrap())),
+            None,
+        )
+    });
+
+    // Prepare fetch options.
+    let mut fo = git2::FetchOptions::new();
+    fo.remote_callbacks(callbacks);
+
+    fo
+}
+
+fn clone_repo(url: &str, target_dir: &Path) -> Result<Repository, git2::Error> {
+    let fo = fetch_opts();
+
+    // Prepare builder.
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.fetch_options(fo);
+
+    // Clone the project.
+    builder.clone(url, target_dir)
+}
+
 impl ResolvedDependency {
     pub fn acquire(&self, target_dir: &Path) {
-        use git2::{Cred, ErrorCode, Repository, RemoteCallbacks};
+        use git2::ErrorCode;
 
         match self {
-            ResolvedDependency::GitRepository { url, branch, git_ref } => {
-                let branch_name = branch.as_ref().map(|s| s.as_str()).unwrap_or("main");
-                let git_ref = git_ref.clone().unwrap_or_else(|| format!("refs/remotes/origin/{}", branch_name));
-                //assert!(git2::Reference::is_valid_name(&git_ref));
-
-                // Prepare callbacks.
-                let mut callbacks = RemoteCallbacks::new();
-                callbacks.credentials(|_url, username_from_url, _allowed_types| {
-                    Cred::ssh_key(
-                        username_from_url.unwrap(),
-                        None,
-                        std::path::Path::new(&format!("{}/.ssh/id_rsa", env::var("HOME").unwrap())),
-                        None,
-                    )
-                });
-
-                // Prepare fetch options.
-                let mut fo = git2::FetchOptions::new();
-                fo.remote_callbacks(callbacks);
-
-                // Prepare builder.
-                let mut builder = git2::build::RepoBuilder::new();
-                builder.fetch_options(fo);
-
-                // Clone the project.
-                let repo = match builder.clone(
-                    url, target_dir
-                ) {
+            ResolvedDependency::GitRepository {
+                url,
+                fetch_ref,
+                checkout_ref,
+            } => {
+                let repo = match clone_repo(url, target_dir) {
                     Err(e) if e.code() == ErrorCode::Exists => {
                         Repository::open(target_dir).expect("could not open")
                     }
@@ -126,26 +131,29 @@ impl ResolvedDependency {
                         eprintln!("clone error: {}", e);
                         todo!()
                     }
-                    Ok(repo) => {
-                        repo
-                    }
+                    Ok(repo) => repo,
                 };
 
                 let head_ref = repo.head().expect("could not get HEAD").resolve().unwrap();
                 let latest_commit = head_ref.peel_to_commit().unwrap();
                 let prev_latest_commit = latest_commit.id();
 
-                repo.find_remote("origin").unwrap().fetch(&[branch_name], None, None).expect("failed to fetch");
-                let ref_object = repo.revparse(&git_ref).expect("invalid ref").from().expect("ref has no from").clone();
-                repo.checkout_head(None).expect("checkout failed");
-                repo.reset(&ref_object, ResetType::Hard, None).expect("failed to reset repo");
-                let head_ref = repo.head().expect("could not get HEAD").resolve().unwrap();
+                repo.find_remote("origin")
+                    .unwrap()
+                    .fetch(&[fetch_ref], Some(&mut fetch_opts()), None)
+                    .expect("failed to fetch");
+                //let ref_object = repo.revparse(&checkout_ref).expect("invalid ref").from().expect("ref has no from").clone();
+                //repo.reset(&ref_object, ResetType::Hard, None).expect("failed to reset repo");
+                repo.set_head(&checkout_ref).expect("invalid ref");
+                repo.checkout_head(Some(CheckoutBuilder::new().force()))
+                    .expect("could not reset");
+                let head_ref = repo.head().expect("could not get HEAD");
                 let latest_commit = head_ref.peel_to_commit().unwrap();
 
                 if prev_latest_commit == latest_commit.id() {
-                    println!("up to date");
+                    println!("at commit {:?}", prev_latest_commit);
                 } else {
-                    println!("updated to commit {:?}", latest_commit.id());
+                    println!("updated to commit {:?} (from {:?})", latest_commit.id(), prev_latest_commit);
                 }
             }
             ResolvedDependency::LocalPath { local_path } => {

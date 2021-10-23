@@ -1,8 +1,8 @@
 use std::fs::read_to_string;
 use std::path::PathBuf;
 
-use ron_reboot::from_str;
 use pkgstrap::*;
+use ron_reboot::from_str;
 
 fn main() {
     let config: Config = from_str(&read_to_string("pkgstrap.ron").unwrap()).unwrap();
