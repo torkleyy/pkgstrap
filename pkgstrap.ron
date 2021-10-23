@@ -1,0 +1,13 @@
+(
+    dependencies: {
+        "foo": (
+            git_repo: "https://github.com/torkleyy/async-rust-parser",
+            branch: "master",
+        ),
+        "bar": (
+            git_repo:  "https://github.com/torkleyy/sortnbackup",
+            branch: "master",
+            ref: "1.3.0",
+        ),
+    }
+)
