@@ -1,5 +1,8 @@
-use std::fs::{ rename};
-use std::{fs, fs::read_to_string, path::PathBuf};
+use std::{
+    fs,
+    fs::{read_to_string, rename},
+    path::PathBuf,
+};
 
 use anyhow::{anyhow, Context};
 use pkgstrap::*;
@@ -71,15 +74,25 @@ fn main() {
 fn app() -> Result<()> {
     let matches: Opt = Opt::from_args();
 
-    let pkgstrap_base = matches.pkgstrap_dir;
-    let pkgstrap_base = &pkgstrap_base;
-    let override_file = pkgstrap_base.join("overrides.ron");
+    let directories = Directories {
+        deps_dir: matches.pkgstrap_dir.join("deps"),
+        local_git_workdirs: matches.pkgstrap_dir.join("git"),
+        pkgstrap_dir: matches.pkgstrap_dir,
+        global_git_repos: dirs::home_dir()
+            .context("no home dir")?
+            .join(".pkgstrap")
+            .join("git-repos"),
+    };
+
+    let Directories {
+        pkgstrap_dir,
+        deps_dir,
+        local_git_workdirs,
+        global_git_repos,
+    } = &directories;
+    let override_file = pkgstrap_dir.join("overrides.ron");
     let override_file = &override_file;
     let config_file = &matches.config;
-    let deps_base = pkgstrap_base.join("deps");
-    let deps_base = &deps_base;
-    let git_base = pkgstrap_base.join("git");
-    let git_base = &git_base;
 
     match matches.subcommand {
         None => {
@@ -89,9 +102,10 @@ fn app() -> Result<()> {
 
             let mut resolver = Resolver::new(config.clone());
 
-            std::fs::create_dir_all(&pkgstrap_base).unwrap();
-            std::fs::create_dir_all(&deps_base).unwrap();
-            std::fs::create_dir_all(&git_base).unwrap();
+            std::fs::create_dir_all(&pkgstrap_dir).unwrap();
+            std::fs::create_dir_all(&deps_dir).unwrap();
+            std::fs::create_dir_all(&global_git_repos).unwrap();
+            std::fs::create_dir_all(&local_git_workdirs).unwrap();
 
             if override_file.exists() {
                 let overrides: ConfigOverrides =
@@ -108,31 +122,40 @@ fn app() -> Result<()> {
                 let target = config.dependencies[name]
                     .target
                     .clone()
-                    .unwrap_or_else(|| deps_base.join(name));
-                dep.acquire(&git_base, &target)
-                    .with_context(|| anyhow!("failed to acquire dependency {}", name))?;
+                    .unwrap_or_else(|| deps_dir.join(name));
+                dep.acquire(DependencyDirs {
+                    base: &directories,
+                    std_target_dir: &target,
+                    in_tree_target_dirs: vec![],
+
+                    local_git_worktree: &local_git_workdirs.join(name)
+                })
+                .with_context(|| anyhow!("failed to acquire dependency {}", name))?;
             }
 
-            fs::write(pkgstrap_base.join("pkgstrap.ron.last"), config_contents)
+            fs::write(pkgstrap_dir.join("pkgstrap.ron.last"), config_contents)
                 .context("could not backup config")?;
         }
         Some(SubCommand::Clean {
-            deps_dir,
-            git,
-            overrides,
+            deps_dir: clean_deps_dir,
+            git: clean_git_dir,
+            overrides: clean_overrides,
         }) => {
-            if deps_dir && deps_base.exists() {
-                remove_dir_all(deps_base)
+            println!("note: the clean subcommand does not work reliably and may print errors");
+
+            if clean_deps_dir && deps_dir.exists() {
+                remove_dir_all(deps_dir)
                     .context("could not remove deps dir")
                     .or_print();
             }
-            if git && git_base.exists() {
-                remove_dir_all(git_base)
+            if clean_git_dir && local_git_workdirs.exists() {
+                // TODO: remove workdir from parent repo
+                remove_dir_all(local_git_workdirs)
                     .context("could not remove git dir")
                     .or_print();
             }
 
-            if overrides && override_file.exists() {
+            if clean_overrides && override_file.exists() {
                 let mut to = override_file.clone();
                 to.set_file_name("overrides");
                 to.set_extension("ron.bk");

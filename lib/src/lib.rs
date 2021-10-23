@@ -7,7 +7,7 @@ mod resolved;
 
 pub use anyhow::{Error, Result};
 
-pub use self::resolved::{ResolvedDependency, Resolver};
+pub use self::resolved::{DependencyDirs, ResolvedDependency, Resolver};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct Config {
@@ -56,6 +56,14 @@ pub enum DependencyOverride {
         #[serde(flatten)]
         git_ref: GitRef,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+pub struct Directories {
+    pub pkgstrap_dir: PathBuf,
+    pub deps_dir: PathBuf,
+    pub local_git_workdirs: PathBuf,
+    pub global_git_repos: PathBuf,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]

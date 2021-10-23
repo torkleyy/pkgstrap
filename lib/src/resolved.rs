@@ -1,15 +1,15 @@
-use std::fs::create_dir_all;
-use std::str::FromStr;
 use std::{
     collections::HashMap,
+    fs::create_dir_all,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 use anyhow::{anyhow, bail, Context};
-use git2::{build::CheckoutBuilder, Cred, RemoteCallbacks, Repository};
+use git2::{build::CheckoutBuilder, Cred, RemoteCallbacks, Repository, Worktree, WorktreeAddOptions, WorktreePruneOptions};
 use url::Url;
 
-use crate::{Config, ConfigOverrides, DependencyOverride, DependencySource, Result};
+use crate::{Config, ConfigOverrides, DependencyOverride, DependencySource, Directories, Result};
 
 #[derive(Debug)]
 pub struct Resolver {
@@ -122,6 +122,8 @@ fn clone_repo(url: &str, target_dir: &Path) -> Result<Repository, git2::Error> {
     let mut builder = git2::build::RepoBuilder::new();
     builder.fetch_options(fo);
 
+    builder.bare(true);
+
     // Clone the project.
     builder.clone(url, target_dir)
 }
@@ -138,6 +140,7 @@ fn normalize_url_for_dir(url: &str) -> Result<PathBuf> {
     Ok(path)
 }
 
+/// Patches (creates or updates) a `symlink_dir` to point to `existing_dir`
 fn safe_symlink_dir(symlink_dir: &Path, existing_dir: &Path) -> Result<()> {
     if std::fs::symlink_metadata(symlink_dir)
         .map(|m| m.file_type().is_symlink())
@@ -159,39 +162,129 @@ fn safe_symlink_dir(symlink_dir: &Path, existing_dir: &Path) -> Result<()> {
     symlink::symlink_dir(existing_dir, symlink_dir).context("failed to symlink")
 }
 
+pub struct DependencyDirs<'a> {
+    pub base: &'a Directories,
+    /// `.pkgstrap/deps/<name>`
+    pub std_target_dir: &'a Path,
+    pub in_tree_target_dirs: Vec<&'a Path>,
+    pub local_git_worktree: &'a Path,
+}
+
+impl<'a> DependencyDirs<'a> {
+    fn global_git_repo(&self, url: &str) -> Result<Repository> {
+        let global_git_dir = self.base.global_git_repos.join(normalize_url_for_dir(url)?);
+        let global_git_dir = &global_git_dir;
+        {
+            let parent_git_dir = global_git_dir.parent().unwrap();
+            create_dir_all(parent_git_dir).with_context(|| {
+                anyhow!(
+                    "failed to create git parent dir {}",
+                    parent_git_dir.display()
+                )
+            })?;
+        }
+
+        let repo = if global_git_dir.exists() {
+            Repository::open(global_git_dir).context("could not open repo")?
+        } else {
+            println!("  cloning into {}...", global_git_dir.display());
+            clone_repo(url, global_git_dir).context("could not clone repo")?
+        };
+
+        if repo.is_worktree() || !repo.is_bare() {
+            bail!(
+                "expected global bare repository at {}",
+                global_git_dir.display()
+            )
+        }
+
+        Ok(repo)
+    }
+}
+
 impl ResolvedDependency {
-    pub fn acquire(&self, git_base_dir: &Path, target_dir: &Path) -> Result<()> {
+    pub fn acquire(&self, dirs: DependencyDirs) -> Result<()> {
+        let target_dir = dirs.std_target_dir;
+
         match self {
             ResolvedDependency::GitRepository {
                 url,
                 fetch_ref,
                 checkout_ref,
             } => {
-                let git_dir = git_base_dir.join(normalize_url_for_dir(url)?);
-                let git_dir = &git_dir;
-                let parent_git_dir = git_dir.parent().unwrap();
-                create_dir_all(parent_git_dir).with_context(|| {
-                    anyhow!(
-                        "failed to create git parent dir {}",
-                        parent_git_dir.display()
-                    )
-                })?;
+                let git_wt_dir = dirs.local_git_worktree;
 
-                let repo = if git_dir.exists() {
-                    Repository::open(git_dir).context("could not open repo")?
+                let global_repo = dirs
+                    .global_git_repo(url)
+                    .context("cannot acquire corresponding global git repo")?;
+                global_repo
+                    .remote_anonymous(url)
+                    .context("invalid remote")?
+                    .fetch(&[fetch_ref], Some(&mut fetch_opts()), None)
+                    .with_context(|| anyhow!("failed to fetch from {}", url))?;
+                let checkout_reference = global_repo
+                    .find_reference(&checkout_ref)
+                    .with_context(|| anyhow!("cannot find reference {}", checkout_ref))?;
+
+                let worktree_name = if git_wt_dir.exists() {
+                    let canonicalized_local_dir = git_wt_dir.canonicalize().context("unsupported workdir path")?;
+                    let canonicalized_local_dir = &canonicalized_local_dir;
+                    let all_worktrees = global_repo.worktrees().context("cannot query worktrees")?;
+
+                    all_worktrees.iter().flatten().find(|name| {
+                        global_repo
+                            .find_worktree(name)
+                            .ok()
+                            .map(|w| w.path().canonicalize().ok().as_ref() == Some(canonicalized_local_dir))
+                            .unwrap_or(false)
+                    }).map(ToString::to_string)
                 } else {
-                    println!("  cloning into {}...", git_dir.display());
-                    clone_repo(url, git_dir).context("could not clone repo")?
+                    None
                 };
+
+                let repo = if worktree_name.is_some() {
+                    Repository::open(git_wt_dir)
+                } else {
+                    if git_wt_dir.exists() {
+                        // this is a repo, but not a worktreee of the correct repo
+                        println!("  replacing worktree due to repo mismatch");
+                        let repo = Repository::open(git_wt_dir).context("could not open repo")?;
+
+                        if !repo.is_worktree() {
+                            bail!("local git dirs must be worktrees, but found standalone repo")
+                        }
+
+                        let worktree = Worktree::open_from_repository(&repo).unwrap();
+                        worktree.prune(Some(WorktreePruneOptions::new().working_tree(true))).context("failed to remove outdated worktree")?;
+
+                    }
+
+                    let mut worktree_options = WorktreeAddOptions::new();
+                    worktree_options.reference(Some(&checkout_reference));
+
+                    global_repo
+                        .worktree(
+                            &format!(
+                                "todo-{}",
+                                git_wt_dir
+                                    .file_name()
+                                    .unwrap()
+                                    .to_str()
+                                    .unwrap()
+                            ),
+                            &git_wt_dir,
+                            Some(&worktree_options),
+                        )
+                        .context("failed to create worktree")?;
+
+                    Repository::open(git_wt_dir)
+                };
+                let repo = repo.context("could not open local workdir")?;
 
                 let head_ref = repo.head().expect("could not get HEAD").resolve().unwrap();
                 let latest_commit = head_ref.peel_to_commit().unwrap();
                 let prev_latest_commit = latest_commit.id();
 
-                repo.remote_anonymous(url)
-                    .context("invalid remote")?
-                    .fetch(&[fetch_ref], Some(&mut fetch_opts()), None)
-                    .with_context(|| anyhow!("failed to fetch from {}", url))?;
                 repo.set_head(&checkout_ref)
                     .context("cannot switch to ref")?;
                 repo.checkout_head(Some(CheckoutBuilder::new().force()))
@@ -203,13 +296,13 @@ impl ResolvedDependency {
                     .peel_to_commit()
                     .context("unexpected error while resolving HEAD")?;
 
-                safe_symlink_dir(target_dir, git_dir)?;
+                safe_symlink_dir(target_dir, git_wt_dir)?;
 
                 if prev_latest_commit == latest_commit.id() {
                     println!("  at commit {:?}", prev_latest_commit);
                 } else {
                     println!(
-                        "  updated to commit {:?} (from {:?})",
+                        "  updated HEAD to commit {:?} (from {:?})",
                         latest_commit.id(),
                         prev_latest_commit
                     );
@@ -220,6 +313,10 @@ impl ResolvedDependency {
 
                 println!("  linked to {}", local_path.display());
             }
+        }
+
+        for dir in dirs.in_tree_target_dirs {
+            safe_symlink_dir(dir, target_dir).context("could not create additional link")?;
         }
 
         Ok(())
