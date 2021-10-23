@@ -99,8 +99,7 @@ impl GitRef {
 
 #[cfg(test)]
 mod tests {
-    use ron_reboot::from_str;
-    use crate::{ConfigOverrides, DependencyOverride, DependencySource, GitRef};
+    use crate::GitRef;
 
     #[test]
     fn checkout_refs() {
@@ -125,22 +124,6 @@ mod tests {
             }
             .to_checkout_refspec(),
             "12f123"
-        );
-    }
-
-    #[test]
-    fn local_path_ron() {
-        assert_eq!(
-           from_str::<DependencyOverride>(r#"(local_path: "../abc")"#).unwrap(),
-            DependencyOverride::LocalPath { local_path: "../abc".into() }
-        );
-    }
-
-    #[test]
-    fn overrides_ron() {
-        assert_eq!(
-            from_str::<ConfigOverrides>(r#"(dependencies: { "abc": (local_path: "../abc-def") })"#).unwrap(),
-            ConfigOverrides { dependencies: vec![("abc".to_owned(), DependencyOverride::LocalPath { local_path: "../abc-def".into() })].into_iter().collect() }
         );
     }
 }

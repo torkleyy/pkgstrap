@@ -24,14 +24,15 @@ fn app() -> Result<()> {
 
     let pkgstrap_base = PathBuf::from(".pkgstrap");
     std::fs::create_dir_all(&pkgstrap_base).unwrap();
+    let deps_base = pkgstrap_base.join("deps");
+    std::fs::create_dir_all(&deps_base).unwrap();
 
     let override_file = pkgstrap_base.join("overrides.ron");
     if override_file.exists() {
-        let overrides: ConfigOverrides = from_str(&read_to_string(&override_file).context("could not open overrides")?)
-            .context("could not parse overrides")?;
-        resolver = resolver.with_config_overrides(
-            overrides
-        );
+        let overrides: ConfigOverrides =
+            from_str(&read_to_string(&override_file).context("could not open overrides")?)
+                .context("could not parse overrides")?;
+        resolver = resolver.with_config_overrides(overrides);
     }
 
     let resolved = resolver.resolve_all()?;
@@ -42,8 +43,8 @@ fn app() -> Result<()> {
         let target = config.dependencies[name]
             .target
             .clone()
-            .unwrap_or_else(|| pkgstrap_base.join(name));
-        dep.acquire(&target)
+            .unwrap_or_else(|| deps_base.join(name));
+        dep.acquire(&pkgstrap_base, &target)
             .with_context(|| anyhow!("failed to acquire dependency {}", name))?;
     }
 

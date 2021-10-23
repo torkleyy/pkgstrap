@@ -9,6 +9,5 @@ edition = "2021"
 anyhow = "1.0.44"
 dirs = "4.0.0"
 git2 = "0.13.23"
-ron-reboot = "0.1.0-preview4"
 serde = { version = "1", features = ["derive"] }
 symlink = "0.1.0"

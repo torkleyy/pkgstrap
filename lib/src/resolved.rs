@@ -118,28 +118,33 @@ fn clone_repo(url: &str, target_dir: &Path) -> Result<Repository, git2::Error> {
     builder.clone(url, target_dir)
 }
 
+fn normalize_url_for_dir(url: &str) -> String {
+    // TODO: not ideal
+    // TODO: token could be part of url
+    url.replace("https://", "")
+        .replace("git@", "")
+        .replace(".git", "")
+        .replace('/', "-")
+        .replace(':', "-")
+}
+
 impl ResolvedDependency {
-    pub fn acquire(&self, target_dir: &Path) -> Result<()> {
+    pub fn acquire(&self, pkgstrap_dir: &Path, target_dir: &Path) -> Result<()> {
         match self {
             ResolvedDependency::GitRepository {
                 url,
                 fetch_ref,
                 checkout_ref,
             } => {
-                if std::fs::symlink_metadata(target_dir)
-                    .map(|m| m.file_type().is_symlink())
-                    .unwrap_or(false)
-                {
-                    symlink::remove_symlink_dir(target_dir).with_context(|| {
-                        anyhow!("could not remove symlink {}", target_dir.display())
-                    })?;
-                }
+                let mut git_dir = pkgstrap_dir.join("git");
+                git_dir.push(normalize_url_for_dir(url));
+                let git_dir = &git_dir;
 
-                let repo = if target_dir.exists() {
-                    Repository::open(target_dir).context("could not open repo")?
+                let repo = if git_dir.exists() {
+                    Repository::open(git_dir).context("could not open repo")?
                 } else {
-                    println!("  cloning into {}...", target_dir.display());
-                    clone_repo(url, target_dir).context("could not clone repo")?
+                    println!("  cloning into {}...", git_dir.display());
+                    clone_repo(url, git_dir).context("could not clone repo")?
                 };
 
                 let head_ref = repo.head().expect("could not get HEAD").resolve().unwrap();
@@ -161,6 +166,22 @@ impl ResolvedDependency {
                     .peel_to_commit()
                     .context("unexpected error while resolving HEAD")?;
 
+                if std::fs::symlink_metadata(target_dir)
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+                {
+                    symlink::remove_symlink_dir(target_dir).with_context(|| {
+                        anyhow!("could not remove symlink {}", target_dir.display())
+                    })?;
+                } else if target_dir.exists() {
+                    bail!(
+                        "dependency dir {} already exists but is not a symlink",
+                        target_dir.display()
+                    )
+                }
+
+                symlink::symlink_dir(git_dir, target_dir).context("failed to symlink")?;
+
                 if prev_latest_commit == latest_commit.id() {
                     println!("  at commit {:?}", prev_latest_commit);
                 } else {
@@ -173,13 +194,29 @@ impl ResolvedDependency {
             }
             ResolvedDependency::LocalPath { local_path } => {
                 if target_dir.exists() {
-                    bail!("target {} already exists, please remove first", target_dir.display());
+                    bail!(
+                        "target {} already exists, please remove first",
+                        target_dir.display()
+                    );
                 }
 
-                symlink::symlink_dir(dbg!(local_path), target_dir).context("failed to symlink")?;
+                symlink::symlink_dir(local_path, target_dir).context("failed to symlink")?;
             }
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::resolved::normalize_url_for_dir;
+
+    #[test]
+    fn normalize_urls() {
+        assert_eq!(
+            normalize_url_for_dir("https://github.com/torkleyy/async-rust-parser.git"),
+            "github.com-torkleyy-async-rust-parser"
+        );
     }
 }
