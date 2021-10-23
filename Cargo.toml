@@ -10,5 +10,6 @@ edition = "2021"
 anyhow = "1.0.44"
 #clap = "2.33.3"
 pkgstrap = { version = "0.1.0", path = "./lib" }
+remove_dir_all = "0.7.0"
 ron-reboot = "0.1.0-preview5"
 structopt = "0.3.25"
