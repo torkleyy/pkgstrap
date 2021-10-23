@@ -1,10 +1,12 @@
-use git2::build::CheckoutBuilder;
-use git2::{Cred, RemoteCallbacks, Repository};
-use std::collections::HashMap;
-use std::env;
-use std::path::{Path, PathBuf};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 
-use crate::{Config, ConfigOverrides, Dependency, DependencyOverride};
+use anyhow::{anyhow, Context};
+use git2::{build::CheckoutBuilder, Cred, RemoteCallbacks, Repository};
+
+use crate::{Config, ConfigOverrides, DependencyOverride, DependencySource, Result};
 
 #[derive(Debug)]
 pub struct Resolver {
@@ -26,16 +28,16 @@ impl Resolver {
         self
     }
 
-    pub fn resolve_all(&self) -> HashMap<String, ResolvedDependency> {
+    pub fn resolve_all(&self) -> Result<HashMap<String, ResolvedDependency>> {
         let overrides = self.config_overrides.as_ref().map(|c| &c.dependencies);
-        let map: HashMap<String, ResolvedDependency> = self
+        let map: Result<HashMap<String, ResolvedDependency>> = self
             .config
             .dependencies
             .iter()
             .map(|(key, value)| {
                 let value = match overrides.and_then(|o| o.get(key)) {
-                    None => match value {
-                        Dependency::GitRepository { git_repo, git_ref } => {
+                    None => match &value.source {
+                        DependencySource::GitRepository { git_repo, git_ref } => {
                             ResolvedDependency::GitRepository {
                                 url: git_repo.clone(),
                                 fetch_ref: git_ref.to_fetch_ref(),
@@ -48,8 +50,8 @@ impl Resolver {
                             ResolvedDependency::GitRepository {
                                 url: git_repo
                                     .as_ref()
-                                    .or(value.git_repo_url())
-                                    .expect("TODO err handling")
+                                    .or(value.source.git_repo_url())
+                                    .ok_or_else(|| anyhow!("override for {} specifies git ref without repo url but root config does not provide repo url either", key))?
                                     .clone(),
                                 fetch_ref: git_ref.to_fetch_ref(),
                                 checkout_ref: git_ref.to_checkout_refspec(),
@@ -63,7 +65,7 @@ impl Resolver {
                     },
                 };
 
-                (key.clone(), value)
+                Ok((key.clone(), value))
             })
             .collect();
 
@@ -88,9 +90,12 @@ fn fetch_opts() -> git2::FetchOptions<'static> {
     let mut callbacks = RemoteCallbacks::new();
     callbacks.credentials(|_url, username_from_url, _allowed_types| {
         Cred::ssh_key(
-            username_from_url.unwrap(),
+            username_from_url.unwrap_or("git"),
             None,
-            std::path::Path::new(&format!("{}/.ssh/id_rsa", env::var("HOME").unwrap())),
+            &dirs::home_dir()
+                .unwrap_or(".".into())
+                .join(".ssh")
+                .join("id_rsa"),
             None,
         )
     });
@@ -114,37 +119,47 @@ fn clone_repo(url: &str, target_dir: &Path) -> Result<Repository, git2::Error> {
 }
 
 impl ResolvedDependency {
-    pub fn acquire(&self, target_dir: &Path) {
+    pub fn acquire(&self, target_dir: &Path) -> Result<()> {
         match self {
             ResolvedDependency::GitRepository {
                 url,
                 fetch_ref,
                 checkout_ref,
             } => {
-                if std::fs::symlink_metadata(target_dir).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
-                    symlink::remove_symlink_dir(target_dir).expect("could not remove symlink");
+                if std::fs::symlink_metadata(target_dir)
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false)
+                {
+                    symlink::remove_symlink_dir(target_dir).with_context(|| {
+                        anyhow!("could not remove symlink {}", target_dir.display())
+                    })?;
                 }
 
                 let repo = if target_dir.exists() {
-                    Repository::open(target_dir).expect("could not open")
+                    Repository::open(target_dir).context("could not open repo")?
                 } else {
                     println!("  cloning into {}...", target_dir.display());
-                    clone_repo(url, target_dir).expect("could not clone")
+                    clone_repo(url, target_dir).context("could not clone repo")?
                 };
 
                 let head_ref = repo.head().expect("could not get HEAD").resolve().unwrap();
                 let latest_commit = head_ref.peel_to_commit().unwrap();
                 let prev_latest_commit = latest_commit.id();
 
-                repo.find_remote("origin")
-                    .unwrap()
+                repo.remote_anonymous(url)
+                    .context("invalid remote")?
                     .fetch(&[fetch_ref], Some(&mut fetch_opts()), None)
-                    .expect("failed to fetch");
-                repo.set_head(&checkout_ref).expect("invalid ref");
+                    .with_context(|| anyhow!("failed to fetch from {}", url))?;
+                repo.set_head(&checkout_ref)
+                    .context("cannot switch to ref")?;
                 repo.checkout_head(Some(CheckoutBuilder::new().force()))
-                    .expect("could not reset");
-                let head_ref = repo.head().expect("could not get HEAD");
-                let latest_commit = head_ref.peel_to_commit().unwrap();
+                    .context("could not checkout HEAD")?;
+                let head_ref = repo
+                    .head()
+                    .context("unexpected error while resolving HEAD")?;
+                let latest_commit = head_ref
+                    .peel_to_commit()
+                    .context("unexpected error while resolving HEAD")?;
 
                 if prev_latest_commit == latest_commit.id() {
                     println!("  at commit {:?}", prev_latest_commit);
@@ -160,5 +175,7 @@ impl ResolvedDependency {
                 symlink::symlink_dir(local_path, target_dir).expect("failed to symlink");
             }
         }
+
+        Ok(())
     }
 }

@@ -1,21 +1,30 @@
-use git2::Reference;
-use std::collections::HashMap;
-use std::path::PathBuf;
+use std::{collections::HashMap, path::PathBuf};
 
+use git2::Reference;
 use serde::Deserialize;
 
 mod resolved;
 
+pub use anyhow::{Error, Result};
+
 pub use self::resolved::{ResolvedDependency, Resolver};
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct Config {
     pub dependencies: HashMap<String, Dependency>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
+pub struct Dependency {
+    pub source: DependencySource,
+    pub target: Option<PathBuf>,
+}
+
+impl Dependency {}
+
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
-pub enum Dependency {
+pub enum DependencySource {
     GitRepository {
         git_repo: String,
         #[serde(flatten)]
@@ -23,20 +32,20 @@ pub enum Dependency {
     },
 }
 
-impl Dependency {
+impl DependencySource {
     pub fn git_repo_url(&self) -> Option<&String> {
         match self {
-            Dependency::GitRepository { git_repo, .. } => Some(git_repo),
+            DependencySource::GitRepository { git_repo, .. } => Some(git_repo),
         }
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct ConfigOverrides {
     pub dependencies: HashMap<String, DependencyOverride>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum DependencyOverride {
     GitRepository {
@@ -49,7 +58,7 @@ pub enum DependencyOverride {
     },
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum GitRef {
     Branch { branch: String },
