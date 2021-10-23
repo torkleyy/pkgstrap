@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::{anyhow, Context};
-use pkgstrap::*;
+use pkgstrap_lib::*;
 use remove_dir_all::remove_dir_all;
 use ron_reboot::from_str;
 use structopt::StructOpt;
@@ -42,6 +42,11 @@ enum SubCommand {
         #[structopt(long)]
         overrides: bool,
     },
+    /// Clone a dependency and setup an override
+    Clone {
+        dependency: String,
+        target: PathBuf,
+    }
 }
 
 trait OrPrint {
@@ -164,6 +169,7 @@ fn app() -> Result<()> {
                     .or_print();
             }
         }
+        Some(SubCommand::Clone { dependency: _, target: _ }) => todo!()
     }
 
     Ok(())
