@@ -115,23 +115,21 @@ fn clone_repo(url: &str, target_dir: &Path) -> Result<Repository, git2::Error> {
 
 impl ResolvedDependency {
     pub fn acquire(&self, target_dir: &Path) {
-        use git2::ErrorCode;
-
         match self {
             ResolvedDependency::GitRepository {
                 url,
                 fetch_ref,
                 checkout_ref,
             } => {
-                let repo = match clone_repo(url, target_dir) {
-                    Err(e) if e.code() == ErrorCode::Exists => {
-                        Repository::open(target_dir).expect("could not open")
-                    }
-                    Err(e) => {
-                        eprintln!("clone error: {}", e);
-                        todo!()
-                    }
-                    Ok(repo) => repo,
+                if std::fs::symlink_metadata(target_dir).map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+                    symlink::remove_symlink_dir(target_dir).expect("could not remove symlink");
+                }
+
+                let repo = if target_dir.exists() {
+                    Repository::open(target_dir).expect("could not open")
+                } else {
+                    println!("  cloning into {}...", target_dir.display());
+                    clone_repo(url, target_dir).expect("could not clone")
                 };
 
                 let head_ref = repo.head().expect("could not get HEAD").resolve().unwrap();
@@ -142,8 +140,6 @@ impl ResolvedDependency {
                     .unwrap()
                     .fetch(&[fetch_ref], Some(&mut fetch_opts()), None)
                     .expect("failed to fetch");
-                //let ref_object = repo.revparse(&checkout_ref).expect("invalid ref").from().expect("ref has no from").clone();
-                //repo.reset(&ref_object, ResetType::Hard, None).expect("failed to reset repo");
                 repo.set_head(&checkout_ref).expect("invalid ref");
                 repo.checkout_head(Some(CheckoutBuilder::new().force()))
                     .expect("could not reset");
@@ -151,9 +147,13 @@ impl ResolvedDependency {
                 let latest_commit = head_ref.peel_to_commit().unwrap();
 
                 if prev_latest_commit == latest_commit.id() {
-                    println!("at commit {:?}", prev_latest_commit);
+                    println!("  at commit {:?}", prev_latest_commit);
                 } else {
-                    println!("updated to commit {:?} (from {:?})", latest_commit.id(), prev_latest_commit);
+                    println!(
+                        "  updated to commit {:?} (from {:?})",
+                        latest_commit.id(),
+                        prev_latest_commit
+                    );
                 }
             }
             ResolvedDependency::LocalPath { local_path } => {
