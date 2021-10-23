@@ -1,5 +1,7 @@
 # `pkgstrap`
 
+![Status](https://img.shields.io/badge/Status-Proof%20of%20Concept-blue?style=flat-square)
+
 An alternative to `git submodules` or `git subtree` that just works, and more!
 
 Current State: Proof of Concept, **do not use**
@@ -40,7 +42,7 @@ pkgstrap -p foo ../foo
 ```
 
 ```shell
-# clone & override all dependencies into ../
+# override & clone all dependencies into ../
 pkgstrap -C ../
 ```
 
