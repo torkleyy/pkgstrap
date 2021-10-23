@@ -43,3 +43,13 @@ pkgstrap -C ../ # clone & override all dependencies into ../
 ```shell
 pkgstrap --pedantic --no-overrides # for continuous integration
 ```
+
+## Why not `git submodules` or `git subtree`?
+
+Both of them add additional complexity the users need to understand. The former is very error-prone,
+especially when it comes to merging. And while subtrees fix some issues of submodules, they essentially
+create new ones if you want to commit changes to both repos.
+
+`pkgstrap` uses simple, easy to grasp git concepts and only adds two config files, which makes it
+a lot easier in my opinion. Both read-only fetching of dependencies and working & updating sub-repos
+can be done easily.
