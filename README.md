@@ -25,23 +25,28 @@ These include Git repositories, but also build / release artifacts.
 ## Planned command-line usage (made up)
 
 ```shell
-pkgstrap # initializes and or updates all dependencies (to the version specified in the config)
+# initializes and or updates all dependencies (to the version specified in the config)
+pkgstrap
 ```
 
 ```shell
-pkgstrap -c foo ../foo # initialize / update but create override for `foo` & clone it in order to work locally
+# initialize / update but create override for `foo` & clone it in order to work locally
+pkgstrap -c foo ../foo
 ```
 
 ```shell
-pkgstrap -p foo ../foo # initialize / update but create override for `foo` using the specified path
+# initialize / update but create override for `foo` using the specified path
+pkgstrap -p foo ../foo
 ```
 
 ```shell
-pkgstrap -C ../ # clone & override all dependencies into ../
+# clone & override all dependencies into ../
+pkgstrap -C ../
 ```
 
 ```shell
-pkgstrap --pedantic --no-overrides # for continuous integration
+# for continuous integration
+pkgstrap --pedantic --no-overrides
 ```
 
 ## Why not `git submodules` or `git subtree`?
