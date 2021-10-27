@@ -6,7 +6,10 @@ use std::{
 };
 
 use anyhow::{anyhow, bail, Context};
-use git2::{BranchType, build::CheckoutBuilder, Cred, RemoteCallbacks, Repository, Worktree, WorktreePruneOptions};
+use git2::{
+    build::CheckoutBuilder, BranchType, Cred, RemoteCallbacks, Repository, Worktree,
+    WorktreePruneOptions,
+};
 use url::Url;
 
 use crate::{Config, ConfigOverrides, DependencyOverride, DependencySource, Directories, Result};
@@ -209,8 +212,7 @@ impl<'a> DependencyDirs<'a> {
                 .canonicalize()
                 .context("unsupported workdir path")?;
             let canonicalized_local_dir = &canonicalized_local_dir;
-            let all_worktrees =
-                global_repo.worktrees().context("cannot query worktrees")?;
+            let all_worktrees = global_repo.worktrees().context("cannot query worktrees")?;
 
             all_worktrees
                 .iter()
@@ -220,8 +222,7 @@ impl<'a> DependencyDirs<'a> {
                         .find_worktree(name)
                         .ok()
                         .map(|w| {
-                            w.path().canonicalize().ok().as_ref()
-                                == Some(canonicalized_local_dir)
+                            w.path().canonicalize().ok().as_ref() == Some(canonicalized_local_dir)
                         })
                         .unwrap_or(false)
                 })
@@ -263,8 +264,7 @@ impl<'a> DependencyDirs<'a> {
             let worktree_name =
                 format!("todo-{}", git_wt_dir.file_name().unwrap().to_str().unwrap());
 
-            let raw_worktree_link_dir =
-                global_repo.path().join("worktrees").join(&worktree_name);
+            let raw_worktree_link_dir = global_repo.path().join("worktrees").join(&worktree_name);
             if raw_worktree_link_dir.exists() {
                 if global_repo
                     .find_worktree(&worktree_name)
@@ -272,9 +272,9 @@ impl<'a> DependencyDirs<'a> {
                     .unwrap_or(false)
                 {
                     bail!(
-                                "worktree name conflict; worktree called {} already exists",
-                                worktree_name
-                            )
+                        "worktree name conflict; worktree called {} already exists",
+                        worktree_name
+                    )
                 }
 
                 println!("  removing existing invalid worktree from repo");
@@ -287,11 +287,7 @@ impl<'a> DependencyDirs<'a> {
             }
 
             global_repo
-                .worktree(
-                    &worktree_name,
-                    &git_wt_dir,
-                    None
-                )
+                .worktree(&worktree_name, &git_wt_dir, None)
                 .context("failed to create worktree")?;
 
             Repository::open(git_wt_dir)

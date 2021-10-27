@@ -12,5 +12,5 @@ anyhow = "1.0.44"
 dirs = "4.0.0"
 pkgstrap-lib = { version = "0.1.0-preview1", path = "./lib" }
 remove_dir_all = "0.7.0"
-ron-reboot = "0.1.0-preview6"
+ron-reboot = "0.1.0-preview8"
 structopt = "0.3.25"

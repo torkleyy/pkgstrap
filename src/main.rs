@@ -7,7 +7,7 @@ use std::{
 use anyhow::{anyhow, Context};
 use pkgstrap_lib::*;
 use remove_dir_all::remove_dir_all;
-use ron_reboot::from_str;
+use ron_reboot::from_str_serde;
 use structopt::StructOpt;
 
 /// pkgstrap
@@ -20,6 +20,13 @@ struct Opt {
     /// Verbose mode (-v, -vv, -vvv, etc.)
     #[structopt(short, long, parse(from_occurrences))]
     verbose: u8,
+    /// Frozen mode, which means dependencies won't be updated.
+    /// Dependencies already present in the pkgstrap-lock.ron will
+    /// be downloaded according to the version specified in the lock file.
+    /// Dependencies not present in the lock file will be downloaded in the latest
+    /// version matching the specification (in pkgstrap.ron).
+    #[structopt(short, long, parse(from_occurrences))]
+    frozen: u8,
     #[structopt(long, default_value = "pkgstrap.ron")]
     config: PathBuf,
     #[structopt(long, default_value = ".pkgstrap")]
@@ -43,10 +50,7 @@ enum SubCommand {
         overrides: bool,
     },
     /// Clone a dependency and setup an override
-    Clone {
-        dependency: String,
-        target: PathBuf,
-    }
+    Clone { dependency: String, target: PathBuf },
 }
 
 trait OrPrint {
@@ -103,7 +107,8 @@ fn app() -> Result<()> {
         None => {
             let config_contents = read_to_string(config_file).context("could not open config")?;
 
-            let config: Config = from_str(&config_contents).context("could not parse config")?;
+            let config: Config =
+                from_str_serde(&config_contents).context("could not parse config")?;
 
             let mut resolver = Resolver::new(config.clone());
 
@@ -113,9 +118,10 @@ fn app() -> Result<()> {
             std::fs::create_dir_all(&local_git_workdirs).unwrap();
 
             if override_file.exists() {
-                let overrides: ConfigOverrides =
-                    from_str(&read_to_string(&override_file).context("could not open overrides")?)
-                        .context("could not parse overrides")?;
+                let overrides: ConfigOverrides = from_str_serde(
+                    &read_to_string(&override_file).context("could not open overrides")?,
+                )
+                .context("could not parse overrides")?;
                 resolver = resolver.with_config_overrides(overrides);
             }
 
@@ -169,7 +175,10 @@ fn app() -> Result<()> {
                     .or_print();
             }
         }
-        Some(SubCommand::Clone { dependency: _, target: _ }) => todo!()
+        Some(SubCommand::Clone {
+            dependency: _,
+            target: _,
+        }) => todo!(),
     }
 
     Ok(())
