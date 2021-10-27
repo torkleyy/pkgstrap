@@ -2,6 +2,12 @@
 
 ![Status](https://img.shields.io/badge/Status-Proof%20of%20Concept-blue?style=flat-square)
 
+**Update**: Just use [gitman](https://github.com/jacebrowning/gitman)
+
+Turns out what I wanted to build already exists :)
+
+## Old README
+
 An alternative to `git submodules` or `git subtree` that just works, and more!
 
 Current State: Proof of Concept, **do not use**
